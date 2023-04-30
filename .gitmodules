@@ -1,0 +1,3 @@
+[submodule "libastro-sys"]
+	path = libastro-sys
+	url = ./libastro-sys

@@ -1,0 +1,24 @@
+[package]
+name = "sidereal_time_calculator"
+version = "0.1.0"
+edition = "2021"
+description = "Local sidereal time clock."
+license = "GPL-3.0-or-later"
+repository = ""
+readme = "README.md"
+keywords = []
+categories = []
+
+# See more keys and their definitions at https: //doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.70"
+chrono = "0.4.24"
+chrono-tz = "0.8.2"
+# clap = { version = "4", features = ["derive"] }
+termion = "2.0.1"
+tzf-rs = "0.4.0"
+libastro-sys = { path = "./libastro-sys" }
+
+# [build-dependencies]
+# bindgen = "0.65.1"
