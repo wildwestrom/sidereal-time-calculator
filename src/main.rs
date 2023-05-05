@@ -1,69 +1,135 @@
-// #![allow(unused)]
+#![allow(unused)]
 use std::{
 	io::{stdout, Write},
+	str::FromStr,
 	thread::sleep,
 };
 
-use anyhow::Result;
-use chrono::{DateTime, Datelike, NaiveTime, Timelike, Utc};
+use anyhow::{anyhow, Result};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
+use chrono_tz::Tz;
+use libastro_sys::{cal_mjd, utc_gst};
 use tzf_rs::DefaultFinder;
 
-mod libastro;
-
-fn get_timezone(latitude: f64, longitude: f64) -> String {
-	// Find the timezone for the given coordinates
-	let finder = DefaultFinder::new();
-	let timezone = finder.get_tz_name(longitude, latitude);
-	timezone.to_string()
+fn utc_to_float(time: NaiveTime) -> f64 {
+	(time.hour() as f64)
+		+ (time.minute() as f64 / (60.0))
+		+ (time.second() as f64 / (60.0 * 60.0))
+		+ (time.nanosecond() as f64 / (60.0 * 60.0 * 1_000_000_000.0))
 }
 
-// fn naive_to_astro_date(gdt: DateTime<Utc>) -> astro::time::Date {
-// 	let day_of_month = astro::time::DayOfMonth {
-// 		day: gdt.date_naive().day() as u8,
-// 		hr: gdt.time().hour() as u8,
-// 		min: gdt.time().minute() as u8,
-// 		sec: gdt.time().second() as f64 + (gdt.time().nanosecond() as f64 / 1_000_000_000.0),
-// 		time_zone: 0.0,
-// 	};
-// 	let dec_day = astro::time::decimal_day(&day_of_month);
-// 	astro::time::Date {
-// 		year: gdt.date_naive().year() as i16,
-// 		month: gdt.date_naive().month() as u8,
-// 		decimal_day: dec_day,
-// 		cal_type: astro::time::CalType::Gregorian,
-// 	}
-// }
+pub fn mjd_from_gregorian_date(date: NaiveDate) -> f64 {
+	let dy = date.day() as f64;
+	let mn = date.month() as i32;
+	let yr = date.year() as i32;
+	let mut mjd = 0.0;
+	unsafe { cal_mjd(mn, dy, yr, &mut mjd as *mut f64) };
+	mjd
+}
 
-// fn radians_to_time(rad: f64) -> f64 {
-// 	let a = ((24 * 60 * 60) as f64 * rad) / std::f64::consts::PI;
-// 	dbg!(a);
-// 	a
-// }
+pub fn mjd_from_gregorian_datetime(datetime: NaiveDateTime) -> f64 {
+	let mjd = mjd_from_gregorian_date(datetime.date());
+	mjd + utc_to_float(datetime.time())
+}
+
+pub fn greenwich_mean_sidereal_time(datetime: NaiveDateTime) -> f64 {
+	let mut gst = 0.0;
+	let utc = utc_to_float(datetime.time());
+	let mjd = mjd_from_gregorian_date(datetime.date()).floor();
+	unsafe { utc_gst(mjd, utc, &mut gst as *mut f64) };
+	gst
+}
+
+/// Find the timezone for the given coordinates
+fn get_timezone(latitude: f64, longitude: f64) -> Result<Tz> {
+	let finder = DefaultFinder::new();
+	let timezone = finder.get_tz_names(longitude, latitude);
+	let tz_str = match timezone.len() {
+		0 => Err(anyhow!("No timezones found")),
+		1 => Ok(timezone.first().expect("already checked").to_owned()),
+		_ => Err(anyhow!("Todo: Allow picking a timezone name")),
+	}?;
+	if let Ok(tz) = Tz::from_str(tz_str) {
+		Ok(tz)
+	} else {
+		Err(anyhow!("Could not convert {tz_str} into a timezone."))
+	}
+}
+
+fn decimal_to_time(dec_time: f64) -> Result<NaiveTime> {
+	let hr = dec_time;
+	let min = hr.fract() * 60.0;
+	let sec = min.fract() * 60.0;
+	let ns = sec.fract() * 1_000_000_000.0;
+
+	NaiveTime::from_hms_nano_opt(hr as u32, min as u32, sec as u32, ns as u32)
+		.ok_or(anyhow!("Time conversion failed."))
+}
+
+fn local_mean_sidereal_time(gmst: f64, longitude: f64) -> f64 {
+	24.0 * ((gmst + longitude / 15.0) / 24.0).fract()
+}
+
+const TIME_FMT_STRING: &str = "%T.%6f";
+const TIME_ZONE_FMT_STRING: &str = "%T.%6f %z/%Z";
 
 fn main() -> Result<()> {
 	// don't use more than two digits of precision for coordinates
-	let latitude = 36.717;
-	let longitude = 127.837;
-	let tz = get_timezone(latitude, longitude);
+	let latitude = 36.755;
+	let longitude = 127.869;
+	let tz = get_timezone(latitude, longitude).expect("should be valid");
+
+	let term = console::Term::stdout();
 
 	loop {
-		println!("Zone for {latitude}, {longitude}: {tz}");
+		let mut lines_to_clear = 0;
+
+		println!(
+			"       Zone for {:>5.1}, {:>5.1}: {:?}",
+			latitude, longitude, tz
+		);
+		lines_to_clear += 1;
+
 		let now = Utc::now();
 		let curr_date = now.date_naive();
 		let curr_time = now.time();
-		println!("Gregorian Date: {}", curr_date);
-		println!("UTC: {}", curr_time.format("%T.%6f"));
+		let local_time = now.with_timezone(&tz);
 
-		let jd = libastro::mjd_from_gregorian(now.naive_utc());
+		println!("              Gregorian Date: {}", curr_date);
+		lines_to_clear += 1;
 
-		// println!("Julian Day: {}", jd);
-		// let mean_st = mn_sidr(jd);
-		// let _st_disp = radians_to_time(mean_st);
-		// println!("Mean Sidereal Time: {}", mean_st);
-		// let apparent_st = apprnt_sidr!(jd);
-		// println!("Apparent Sidereal Time: {}", apparent_st);
-		// stdout().flush().unwrap();
-		// sleep(std::time::Duration::from_millis(100));
-		// print!("{}", termion::clear::All);
+		println!(
+			"              Universal Time: {}",
+			now.format(TIME_ZONE_FMT_STRING)
+		);
+		lines_to_clear += 1;
+
+		println!(
+			"                  Local Time: {}",
+			local_time.format(TIME_ZONE_FMT_STRING)
+		);
+		lines_to_clear += 1;
+
+		let mjd = mjd_from_gregorian_datetime(now.naive_utc());
+		println!("         Modified Julian Day: {}", mjd);
+		lines_to_clear += 1;
+
+		let gmst = greenwich_mean_sidereal_time(now.naive_utc());
+		println!(
+			"Greenwich mean Sidereal Time: {} ",
+			decimal_to_time(gmst).unwrap().format(TIME_FMT_STRING)
+		);
+		lines_to_clear += 1;
+
+		let lmst = local_mean_sidereal_time(gmst, longitude);
+		println!(
+			"    Local mean Sidereal Time: {}",
+			decimal_to_time(lmst).unwrap().format(TIME_FMT_STRING)
+		);
+		lines_to_clear += 1;
+
+		stdout().flush().unwrap();
+		sleep(std::time::Duration::from_millis(5));
+		let _ = term.clear_last_lines(lines_to_clear)?;
 	}
 }

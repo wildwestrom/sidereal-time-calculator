@@ -16,9 +16,9 @@ anyhow = "1.0.70"
 chrono = "0.4.24"
 chrono-tz = "0.8.2"
 # clap = { version = "4", features = ["derive"] }
-termion = "2.0.1"
 tzf-rs = "0.4.0"
 libastro-sys = { path = "./libastro-sys" }
+console = "0.15.5"
 
 # [build-dependencies]
 # bindgen = "0.65.1"
