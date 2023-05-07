@@ -101,7 +101,7 @@ fn display_info(latitude: Option<f64>, longitude: f64) -> Result<()> {
 			));
 		} else {
 			info.push_str(&format!(
-				"                       Longitude: {}\n",
+				"                       Longitude: {:>5.1}\n",
 				longitude
 			))
 		}
