@@ -19,6 +19,7 @@ chrono-tz = "0.8.2"
 tzf-rs = "0.4.0"
 libastro-sys = { path = "./libastro-sys" }
 console = "0.15.5"
+once_cell = "1.17.1"
 
 # [build-dependencies]
 # bindgen = "0.65.1"

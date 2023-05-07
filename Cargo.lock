@@ -1168,6 +1168,7 @@ dependencies = [
  "chrono-tz",
  "console",
  "libastro-sys",
+ "once_cell",
  "tzf-rs",
 ]
 

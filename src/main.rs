@@ -1,13 +1,10 @@
-use std::{
-	io::{stdout, Write},
-	str::FromStr,
-	thread::sleep,
-};
+use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Utc};
 use chrono_tz::Tz;
 use libastro_sys::{cal_mjd, utc_gst};
+use once_cell::sync::Lazy;
 use tzf_rs::DefaultFinder;
 
 fn utc_to_float(time: NaiveTime) -> f64 {
@@ -48,11 +45,7 @@ fn get_timezone(latitude: f64, longitude: f64) -> Result<Tz> {
 		1 => Ok(timezone.first().expect("already checked").to_owned()),
 		_ => Err(anyhow!("Todo: Allow picking a timezone name")),
 	}?;
-	if let Ok(tz) = Tz::from_str(tz_str) {
-		Ok(tz)
-	} else {
-		Err(anyhow!("Could not convert {tz_str} into a timezone."))
-	}
+	Tz::from_str(tz_str).map_err(|e| anyhow!("Could not convert string: {e}"))
 }
 
 fn decimal_to_time(dec_time: f64) -> Result<NaiveTime> {
@@ -69,82 +62,85 @@ fn local_mean_sidereal_time(gmst: f64, longitude: f64) -> f64 {
 	24.0 * ((gmst + longitude / 15.0) / 24.0).fract()
 }
 
-const TIME_FMT_STRING: &str = "%T.%6f";
-const TIME_ZONE_FMT_STRING: &str = "%T.%6f %z/%Z";
+const SPOTISWOODE_PEAK_TIME: Lazy<NaiveTime> =
+	Lazy::new(|| NaiveTime::from_hms_opt(13, 30, 0).unwrap());
+
+fn info_text(utc_datetime: DateTime<Utc>, latitude: f64, longitude: f64) -> Result<String> {
+	const TIME_FMT_STRING: &str = "%T.%6f";
+	const TIME_ZONE_FMT_STRING: &str = "%T.%6f %z/%Z";
+
+	let mut info = String::new();
+	// don't use more than two digits of precision for coordinates
+	let timezone: Tz = get_timezone(latitude, longitude).expect("No timezone");
+
+	info.push_str(&format!(
+		"           Zone for {:>5.1}, {:>5.1}: {:?}\n",
+		latitude, longitude, timezone
+	));
+
+	let curr_date = utc_datetime.date_naive();
+
+	info.push_str(&format!(
+		"                  Gregorian Date: {}\n",
+		curr_date
+	));
+
+	info.push_str(&format!(
+		"                  Universal Time: {}\n",
+		utc_datetime.format(TIME_ZONE_FMT_STRING)
+	));
+
+	let local_time = utc_datetime.with_timezone(&timezone);
+	info.push_str(&format!(
+		"                      Local Time: {}\n",
+		local_time.format(TIME_ZONE_FMT_STRING)
+	));
+
+	let mjd = mjd_from_gregorian_datetime(utc_datetime.naive_utc());
+	info.push_str(&format!("             Modified Julian Day: {}\n", mjd));
+
+	let gmst = greenwich_mean_sidereal_time(utc_datetime.naive_utc());
+	info.push_str(&format!(
+		"    Greenwich mean Sidereal Time: {} \n",
+		decimal_to_time(gmst)?.format(TIME_FMT_STRING)
+	));
+
+	let lmst = local_mean_sidereal_time(gmst, longitude);
+	info.push_str(&format!(
+		"        Local mean Sidereal Time: {}\n",
+		decimal_to_time(lmst)?.format(TIME_FMT_STRING)
+	));
+
+	let time_until_peak = {
+		let duration = SPOTISWOODE_PEAK_TIME.signed_duration_since(decimal_to_time(lmst)?);
+		if duration.lt(&Duration::zero()) {
+			// If the duration is negative, add 24 hours to it to get the time until the next occurrence.
+			duration + chrono::Duration::hours(24)
+		} else {
+			duration
+		}
+	};
+	info.push_str(&format!(
+		"Time Until Spotiswoode Peak Time: {}\n",
+		decimal_to_time(
+			time_until_peak.num_nanoseconds().unwrap() as f64 / 1_000_000_000.0 / 60.0 / 60.0
+		)?
+		.format(TIME_FMT_STRING),
+	));
+
+	Ok(info)
+}
 
 fn main() -> Result<()> {
-	// don't use more than two digits of precision for coordinates
-	let latitude = 36.755;
-	let longitude = 127.869;
-	let tz = get_timezone(latitude, longitude)?;
-	let spotiswoode_peak_time = NaiveTime::from_hms_opt(13, 30, 0).unwrap();
+	let term = console::Term::buffered_stdout();
 
-	let term = console::Term::stdout();
+	const LATITUDE: f64 = 36.755;
+	const LONGITUDE: f64 = 127.869;
 
 	loop {
-		let mut lines_to_clear = 0;
-
-		println!(
-			"       Zone for {:>5.1}, {:>5.1}: {:?}",
-			latitude, longitude, tz
-		);
-		lines_to_clear += 1;
-
-		let now = Utc::now();
-		let curr_date = now.date_naive();
-		let local_time = now.with_timezone(&tz);
-
-		println!("                  Gregorian Date: {}", curr_date);
-		lines_to_clear += 1;
-
-		println!(
-			"                  Universal Time: {}",
-			now.format(TIME_ZONE_FMT_STRING)
-		);
-		lines_to_clear += 1;
-
-		println!(
-			"                      Local Time: {}",
-			local_time.format(TIME_ZONE_FMT_STRING)
-		);
-		lines_to_clear += 1;
-
-		let mjd = mjd_from_gregorian_datetime(now.naive_utc());
-		println!("             Modified Julian Day: {}", mjd);
-		lines_to_clear += 1;
-
-		let gmst = greenwich_mean_sidereal_time(now.naive_utc());
-		println!(
-			"    Greenwich mean Sidereal Time: {} ",
-			decimal_to_time(gmst)?.format(TIME_FMT_STRING)
-		);
-		lines_to_clear += 1;
-
-		let lmst = local_mean_sidereal_time(gmst, longitude);
-		println!(
-			"        Local mean Sidereal Time: {}",
-			decimal_to_time(lmst)?.format(TIME_FMT_STRING)
-		);
-		lines_to_clear += 1;
-
-		let time_until_peak = {
-			let duration = spotiswoode_peak_time.signed_duration_since(decimal_to_time(lmst)?);
-			if duration.lt(&Duration::zero()) {
-				// If the duration is negative, add 24 hours to it to get the time until the next occurrence.
-				duration + chrono::Duration::hours(24)
-			} else {
-				duration
-			}
-		};
-		println!(
-			"Time Until Spotiswoode Peak Time: {}",
-			decimal_to_time(time_until_peak.num_nanoseconds().unwrap() as f64 / 1_000_000_000.0 / 60.0 / 60.0)?
-				.format(TIME_FMT_STRING),
-		);
-		lines_to_clear += 1;
-
-		stdout().flush().unwrap();
-		sleep(std::time::Duration::from_millis(5));
-		let _ = term.clear_last_lines(lines_to_clear)?;
+		let info = info_text(Utc::now(), LATITUDE, LONGITUDE)?;
+		term.write_line(&info)?;
+		term.flush()?;
+		term.clear_last_lines(9)?;
 	}
 }
