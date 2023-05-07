@@ -1,6 +1,6 @@
 # sidereal-time-calculator
 
-# License
+## License
 
 sidereal-time-calculator: Local sidereal time clock.  
 Copyright © 2023 Christian Westrom <c.westrom@westrom.xyz>
