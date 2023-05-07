@@ -28,7 +28,9 @@ cargo clippy -- \
 	-A clippy::mod_module_files \
 	-A clippy::option_if_let_else \
 	-A clippy::missing_trait_methods \
-	-A clippy::allow_attributes_without_reason
+	-A clippy::allow_attributes_without_reason \
+	-A clippy::uninlined_format_args \
+	-A clippy::multiple_crate_versions
 '''
 
 # Format
