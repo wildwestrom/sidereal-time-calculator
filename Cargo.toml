@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Local sidereal time clock."
 license = "GPL-3.0-or-later"
-repository = ""
+repository = "https://github.com/wildwestrom/sidereal-time-calculator"
 readme = "README.md"
-keywords = []
-categories = []
+keywords = ["sidereal", "time", "spotiswoode"]
+categories = ["date-and-time", "science"]
 
 # See more keys and their definitions at https: //doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -17,6 +17,6 @@ chrono = "0.4.24"
 chrono-tz = "0.8.2"
 # clap = { version = "4", features = ["derive"] }
 tzf-rs = "0.4.0"
-libastro-sys = { path = "./libastro-sys" }
+libastro-sys = { git = "https://github.com/wildwestrom/libastro-sys" }
 console = "0.15.5"
 once_cell = "1.17.1"
