@@ -8,31 +8,34 @@ use once_cell::sync::Lazy;
 use tzf_rs::DefaultFinder;
 
 fn utc_to_float(time: NaiveTime) -> f64 {
-	(time.hour() as f64)
-		+ (time.minute() as f64 / (60.0))
-		+ (time.second() as f64 / (60.0 * 60.0))
-		+ (time.nanosecond() as f64 / (60.0 * 60.0 * 1_000_000_000.0))
+	f64::from(time.hour())
+		+ (f64::from(time.minute()) / (60.0))
+		+ (f64::from(time.second()) / (60.0 * 60.0))
+		+ (f64::from(time.nanosecond()) / (60.0 * 60.0 * 1_000_000_000.0))
 }
 
-pub fn mjd_from_gregorian_date(date: NaiveDate) -> f64 {
-	let dy = date.day() as f64;
-	let mn = date.month() as i32;
-	let yr = date.year() as i32;
+#[must_use]
+fn mjd_from_gregorian_date(date: NaiveDate) -> f64 {
+	let dy = f64::from(date.day());
+	let mn = i32::try_from(date.month()).unwrap();
+	let yr = date.year();
 	let mut mjd = 0.0;
-	unsafe { cal_mjd(mn, dy, yr, &mut mjd as *mut f64) };
+	unsafe { cal_mjd(mn, dy, yr, std::ptr::addr_of_mut!(mjd)) };
 	mjd
 }
 
-pub fn mjd_from_gregorian_datetime(datetime: NaiveDateTime) -> f64 {
+#[must_use]
+fn mjd_from_gregorian_datetime(datetime: NaiveDateTime) -> f64 {
 	let mjd = mjd_from_gregorian_date(datetime.date());
 	mjd + utc_to_float(datetime.time())
 }
 
-pub fn greenwich_mean_sidereal_time(datetime: NaiveDateTime) -> f64 {
+#[must_use]
+fn greenwich_mean_sidereal_time(datetime: NaiveDateTime) -> f64 {
 	let mut gst = 0.0;
 	let utc = utc_to_float(datetime.time());
 	let mjd = mjd_from_gregorian_date(datetime.date()).floor();
-	unsafe { utc_gst(mjd, utc, &mut gst as *mut f64) };
+	unsafe { utc_gst(mjd, utc, std::ptr::addr_of_mut!(gst)) };
 	gst
 }
 
@@ -48,22 +51,22 @@ fn get_timezone(latitude: f64, longitude: f64) -> Result<Tz> {
 	Tz::from_str(tz_str).map_err(|e| anyhow!("Could not convert string: {e}"))
 }
 
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::cast_sign_loss)]
 fn decimal_to_time(dec_time: f64) -> Result<NaiveTime> {
+	assert!(dec_time.is_sign_positive());
 	let hr = dec_time;
 	let min = hr.fract() * 60.0;
 	let sec = min.fract() * 60.0;
 	let ns = sec.fract() * 1_000_000_000.0;
 
 	NaiveTime::from_hms_nano_opt(hr as u32, min as u32, sec as u32, ns as u32)
-		.ok_or(anyhow!("Time conversion failed, time: {dec_time}"))
+		.ok_or_else(|| anyhow!("Time conversion failed, time: {dec_time}"))
 }
 
 fn local_mean_sidereal_time(gmst: f64, longitude: f64) -> f64 {
 	24.0 * ((gmst + longitude / 15.0) / 24.0).fract()
 }
-
-const SPOTISWOODE_PEAK_TIME: Lazy<NaiveTime> =
-	Lazy::new(|| NaiveTime::from_hms_opt(13, 30, 0).unwrap());
 
 fn info_text(utc_datetime: DateTime<Utc>, latitude: f64, longitude: f64) -> Result<String> {
 	const TIME_FMT_STRING: &str = "%T.%6f";
@@ -99,20 +102,23 @@ fn info_text(utc_datetime: DateTime<Utc>, latitude: f64, longitude: f64) -> Resu
 	let mjd = mjd_from_gregorian_datetime(utc_datetime.naive_utc());
 	info.push_str(&format!("             Modified Julian Day: {}\n", mjd));
 
-	let gmst = greenwich_mean_sidereal_time(utc_datetime.naive_utc());
+	let greenwich_mst = greenwich_mean_sidereal_time(utc_datetime.naive_utc());
 	info.push_str(&format!(
 		"    Greenwich mean Sidereal Time: {} \n",
-		decimal_to_time(gmst)?.format(TIME_FMT_STRING)
+		decimal_to_time(greenwich_mst)?.format(TIME_FMT_STRING)
 	));
 
-	let lmst = local_mean_sidereal_time(gmst, longitude);
+	let local_mst = local_mean_sidereal_time(greenwich_mst, longitude);
 	info.push_str(&format!(
 		"        Local mean Sidereal Time: {}\n",
-		decimal_to_time(lmst)?.format(TIME_FMT_STRING)
+		decimal_to_time(local_mst)?.format(TIME_FMT_STRING)
 	));
 
 	let time_until_peak = {
-		let duration = SPOTISWOODE_PEAK_TIME.signed_duration_since(decimal_to_time(lmst)?);
+		static SPOTISWOODE_PEAK_TIME: Lazy<NaiveTime> =
+			Lazy::new(|| NaiveTime::from_hms_opt(13, 30, 0).unwrap());
+
+		let duration = SPOTISWOODE_PEAK_TIME.signed_duration_since(decimal_to_time(local_mst)?);
 		if duration.lt(&Duration::zero()) {
 			// If the duration is negative, add 24 hours to it to get the time until the next occurrence.
 			duration + chrono::Duration::hours(24)
@@ -132,15 +138,15 @@ fn info_text(utc_datetime: DateTime<Utc>, latitude: f64, longitude: f64) -> Resu
 }
 
 fn main() -> Result<()> {
-	let term = console::Term::buffered_stdout();
-
 	const LATITUDE: f64 = 36.755;
 	const LONGITUDE: f64 = 127.869;
+	let term = console::Term::buffered_stdout();
 
 	loop {
 		let info = info_text(Utc::now(), LATITUDE, LONGITUDE)?;
 		term.write_line(&info)?;
 		term.flush()?;
 		term.clear_last_lines(9)?;
+		std::thread::sleep(std::time::Duration::from_micros(200));
 	}
 }
